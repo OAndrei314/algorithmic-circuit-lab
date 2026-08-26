@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "algorithmic-circuit-lab"
+version = "0.1.0"
+description = "Mechanistic interpretability toolkit: trains tiny transformers on algorithmic tasks and reverse-engineers the circuits they learn, validated with ablation experiments."
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["torch>=2.2"]
+
+[project.scripts]
+circuit-lab-train = "circuit_lab.cli:train_cli"
+circuit-lab-analyze = "circuit_lab.cli:analyze_cli"
+
+[tool.setuptools]
+packages = ["circuit_lab"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
