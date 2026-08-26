@@ -1,0 +1,30 @@
+{
+  "grokked": true,
+  "grok_step": 42600,
+  "final_train_acc": 1.0,
+  "final_test_acc": 0.9923703074455261,
+  "total_wall_clock_seconds": 1376.7533719539642,
+  "baseline_test_accuracy": 0.9923703074455261,
+  "head_dla_scores": [
+    0.13738051056861877,
+    0.4674677550792694,
+    0.2669451832771301,
+    0.3675367832183838
+  ],
+  "top_heads_by_dla": [
+    1
+  ],
+  "accuracy_after_ablating_top_head": 0.3636825978755951,
+  "accuracy_after_ablating_bottom_head": 0.3143438398838043,
+  "accuracy_after_ablating_all_but_top_head": 0.03763987869024277,
+  "fraction_embedding_power_in_top_2_freqs": 0.9249338507652283,
+  "fraction_embedding_power_in_top_6_freqs": 0.9567016959190369,
+  "accuracy_after_ablating_top_20_neurons": 0.6403865814208984,
+  "accuracy_after_ablating_random_20_neurons_5_seeds": [
+    0.9857578873634338,
+    0.9872838258743286,
+    0.9852492213249207,
+    0.9771108627319336,
+    0.9771108627319336
+  ]
+}

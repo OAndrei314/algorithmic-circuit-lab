@@ -1,0 +1,14 @@
+{
+  "p": 53,
+  "train_fraction": 0.3,
+  "d_model": 64,
+  "n_heads": 4,
+  "d_mlp": 256,
+  "steps": 30000,
+  "lr": 0.001,
+  "weight_decay": 1.0,
+  "warmup_steps": 10,
+  "seed": 0,
+  "eval_every": 100,
+  "log_every": 1000
+}
