@@ -18,6 +18,7 @@ from circuit_lab.interp import (
     fourier_power_spectrum,
     fraction_of_power_in_top_k,
     rank_components_by_dla,
+    rank_neurons_by_dla,
 )
 from circuit_lab.train import TrainConfig, save_run, train
 
@@ -82,11 +83,22 @@ def main():
     # Neuron-level ablation: top vs. random-equal-sized set, several seeds
     # for the random baseline so the comparison is honest.
     _, cache = model(train_inputs, return_cache=True)
-    neuron_dla_proxy = cache["mlp_post"][:, -1, :].abs().mean(dim=0)
-    top_neurons = torch.argsort(neuron_dla_proxy, descending=True)[:20].tolist()
+    neuron_magnitude_proxy = cache["mlp_post"][:, -1, :].abs().mean(dim=0)
+    top_neurons = torch.argsort(neuron_magnitude_proxy, descending=True)[:20].tolist()
     acc_ablate_top_neurons = ablation_accuracy(
         model, test_inputs, test_labels, ablate_neurons=top_neurons, mean_mlp_post=mean_mlp_post
     )
+
+    # Exact-DLA neuron ranking, checked against the magnitude proxy above:
+    # does the cheap correlational proxy actually agree with which neurons
+    # the model provably depends on for the correct logit?
+    neuron_dla_order, neuron_dla_scores = rank_neurons_by_dla(model, test_inputs, test_labels)
+    top_neurons_by_dla = neuron_dla_order[:20]
+    acc_ablate_top_neurons_by_dla = ablation_accuracy(
+        model, test_inputs, test_labels, ablate_neurons=top_neurons_by_dla, mean_mlp_post=mean_mlp_post
+    )
+    neuron_ranking_overlap = len(set(top_neurons) & set(top_neurons_by_dla))
+
     random_neuron_accs = []
     g = torch.Generator().manual_seed(0)
     for _ in range(5):
@@ -114,7 +126,11 @@ def main():
         "accuracy_after_ablating_bottom_head": acc_ablate_bottom,
         "accuracy_after_ablating_all_but_top_head": acc_ablate_all_but_top,
         "fraction_embedding_power_in_top_6_freqs": power_top6,
+        "top_20_neurons_by_magnitude_proxy": sorted(top_neurons),
         "accuracy_after_ablating_top_20_neurons": acc_ablate_top_neurons,
+        "top_20_neurons_by_exact_dla": sorted(top_neurons_by_dla),
+        "accuracy_after_ablating_top_20_neurons_by_dla": acc_ablate_top_neurons_by_dla,
+        "neuron_ranking_overlap_count": neuron_ranking_overlap,
         "accuracy_after_ablating_random_20_neurons_5_seeds": random_neuron_accs,
         "wall_clock_seconds": result.wall_clock_seconds,
     }

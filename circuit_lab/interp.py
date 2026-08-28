@@ -121,3 +121,48 @@ def rank_components_by_dla(
     per_head_mean = dla["per_head_correct"].mean(dim=0)  # (n_heads,)
     order = torch.argsort(per_head_mean, descending=True).tolist()
     return order, per_head_mean.tolist()
+
+
+@torch.no_grad()
+def neuron_direct_logit_attribution(
+    model: OneLayerTransformer, inputs: torch.Tensor, labels: torch.Tensor
+):
+    """Decompose the MLP's contribution to the correct-answer logit into an
+    exact per-neuron term plus a constant bias term.
+
+    ``mlp_out = mlp_post @ W_out + b_out``, i.e. the MLP's output is itself
+    an exact linear combination of the *post-GELU* neuron activations --
+    summing per-neuron contributions is still exact here, unlike attributing
+    importance from the pre-activation, because the nonlinearity has already
+    been applied by this point. So ``per_neuron_correct.sum(-1) +
+    bias_correct`` reconstructs ``direct_logit_attribution(...)["mlp_correct"]``
+    exactly, the same way the head-level decomposition reconstructs the full
+    logit.
+    """
+    _, cache = model(inputs, return_cache=True)
+    batch = torch.arange(inputs.shape[0])
+
+    mlp_post_final = cache["mlp_post"][:, -1, :]  # (batch, d_mlp)
+    neuron_to_logit = model.W_out @ model.W_U  # (d_mlp, vocab)
+    per_neuron = mlp_post_final * neuron_to_logit[:, labels].T  # (batch, d_mlp)
+
+    bias_to_logit = model.b_out @ model.W_U  # (vocab,)
+    bias_correct = bias_to_logit[labels]
+
+    return {
+        "per_neuron_correct": per_neuron,
+        "bias_correct": bias_correct,
+    }
+
+
+def rank_neurons_by_dla(
+    model: OneLayerTransformer, inputs: torch.Tensor, labels: torch.Tensor
+):
+    """Rank MLP neurons by mean direct logit attribution to the correct
+    class -- the exact-decomposition analogue of the cheap activation-
+    magnitude proxy used for neuron importance elsewhere, so the two can be
+    checked against each other."""
+    dla = neuron_direct_logit_attribution(model, inputs, labels)
+    per_neuron_mean = dla["per_neuron_correct"].mean(dim=0)  # (d_mlp,)
+    order = torch.argsort(per_neuron_mean, descending=True).tolist()
+    return order, per_neuron_mean.tolist()

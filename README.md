@@ -104,6 +104,9 @@ thread. Full config and raw per-eval history are checked in at
 just asserted. Reproduce with `python scripts/run_experiment.py` followed by
 `python scripts/continue_run.py --run-dir runs/modadd_p53 --extra-steps 30000`
 (see "the training run took longer than expected" below for why it's two commands).
+`python scripts/reanalyze.py --run-dir runs/modadd_p53` re-runs just the analysis step
+(DLA, ablation, Fourier) against the existing checkpoint without retraining — used here
+to add the exact-DLA neuron ranking to `analysis.json` after the fact.
 
 ### The training run took longer than expected, and that's worth reporting as-is
 
@@ -208,22 +211,62 @@ non-trivial concentration of importance — but a milder one than the attention-
 result above, where losing a *single* head (1 of 4) was already catastrophic. The MLP
 computation here looks more distributed than the attention circuit.
 
+### Does exact per-neuron DLA agree with the activation-magnitude proxy above?
+
+Only partially, and — like the head-level DLA-vs-ablation result above — the
+disagreement is the more informative finding. `neuron_direct_logit_attribution`
+(`circuit_lab/interp.py`) extends the exact decomposition down to individual
+post-GELU neurons: because `mlp_out = mlp_post @ W_out + b_out`, summing each
+neuron's contribution and the bias term reconstructs the MLP's logit
+contribution exactly (`tests/test_interp.py` checks this to `1e-4`), the same
+correctness bar the head-level DLA is held to.
+
+Ranking all 256 neurons by exact DLA to the correct logit and taking the top 20
+gives a set that overlaps the magnitude-proxy's top 20 in only **9 of 20
+neurons (45%)** — the two rankings mostly disagree about which neurons matter.
+Ablating each top-20 set separately:
+
+| intervention (mean-ablated) | test accuracy | vs. baseline 99.24% |
+| --- | ---: | ---: |
+| top 20 by activation magnitude | 64.04% | -35.2 pts |
+| top 20 by exact DLA | 73.55% | -25.7 pts |
+| random 20, 5 seeds | 97.7%-98.7% | -0.5 to -1.5 pts |
+
+Both are far more damaging than a random set, so both proxies are finding
+*real* structure — but the cheap magnitude proxy, not the theoretically
+cleaner exact-DLA ranking, picks the more causally important set here. That's
+the opposite of what "DLA is the principled version of a magnitude heuristic"
+would predict, and it's consistent with the head-level result: DLA measures a
+component's *average* alignment with the correct-logit direction, which is not
+the same thing as how much the network's output depends on that component
+being present. A neuron can have a large, consistent average contribution
+(high DLA) while being redundant with others that point the same way, and a
+neuron with modest average contribution can still be load-bearing if nothing
+else covers the frequency it participates in. **The practical lesson carries
+over unchanged from the head-level analysis: neither DLA nor a raw-magnitude
+heuristic is a substitute for actually ablating and re-measuring — this is
+the second independent piece of evidence in this repo for that conclusion,
+not a restatement of the first.**
+
 ## Status / next steps
 
 Implemented: full training loop with grokking-inducing weight decay, exact direct logit
-attribution, mean-ablation causal validation at both the attention-head and MLP-neuron level,
-and Fourier analysis of the learned embeddings. The three questions posed in "Why this
-problem" above are all answered with real numbers, not asserted.
+attribution at both the attention-head and individual-MLP-neuron level, mean-ablation causal
+validation at both levels, and Fourier analysis of the learned embeddings. The three questions
+posed in "Why this problem" above are all answered with real numbers, not asserted, and the
+exact-DLA-vs-magnitude-proxy check flagged as a next step in an earlier version of this section
+is now done (see "Does exact per-neuron DLA agree with the activation-magnitude proxy above?").
 
 Open threads a future run could pick up: (1) this repo only studies modular *addition* —
 Nanda et al.'s follow-on work also covers subtraction and other group operations, which would
 need a different circuit (and might not show the same clean Fourier structure) to describe;
-(2) the neuron-level ablation ranks importance with a cheap activation-magnitude proxy rather
-than DLA (unlike the head-level ranking) — extending exact DLA down to individual MLP neurons
-and checking whether it agrees with the magnitude proxy is a natural next correctness check;
-(3) no sparse autoencoder is trained on the MLP activations here — an SAE could test whether
+(2) no sparse autoencoder is trained on the MLP activations here — an SAE could test whether
 the "sparse Fourier" story is the *complete* picture of what the neurons represent, or whether
-there's structure the raw-activation analysis in this repo is missing.
+there's structure the raw-activation analysis in this repo is missing; (3) the DLA-vs-ablation
+mismatch found at both the head and neuron level suggests a natural follow-up: does *iterative*
+ablation (remove the single most damaging component, re-rank, repeat) converge on a
+smaller/different set than either one-shot ranking, given that components can be redundant with
+each other in ways a static ranking can't see?
 
 ## License
 

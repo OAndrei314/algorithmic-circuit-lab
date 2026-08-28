@@ -7,7 +7,9 @@ from circuit_lab.interp import (
     direct_logit_attribution,
     fourier_power_spectrum,
     fraction_of_power_in_top_k,
+    neuron_direct_logit_attribution,
     rank_components_by_dla,
+    rank_neurons_by_dla,
 )
 from circuit_lab.model import OneLayerTransformer, TransformerConfig
 
@@ -79,3 +81,43 @@ def test_top_k_power_fraction_is_monotonic_in_k():
     frac_all = fraction_of_power_in_top_k(spectrum, 11 // 2 + 1)
     assert frac_1 <= frac_3 <= frac_all
     assert abs(frac_all - 1.0) < 1e-5
+
+
+def test_neuron_dla_is_an_exact_decomposition_of_the_mlp_contribution():
+    """per_neuron_correct.sum(-1) + bias_correct must reconstruct the whole
+    MLP's contribution to the correct logit exactly -- the same correctness
+    bar as the head-level decomposition, just one level deeper (down to
+    individual post-GELU neuron activations instead of whole components)."""
+    model, ds, _ = _tiny_model_and_data()
+    inputs, labels = ds.test_inputs(), ds.test_labels()
+    dla = direct_logit_attribution(model, inputs, labels)
+    neuron_dla = neuron_direct_logit_attribution(model, inputs, labels)
+
+    reconstructed_mlp = neuron_dla["per_neuron_correct"].sum(dim=-1) + neuron_dla["bias_correct"]
+    assert torch.allclose(reconstructed_mlp, dla["mlp_correct"], atol=1e-4)
+
+
+def test_rank_neurons_by_dla_returns_all_neurons_once():
+    model, ds, cfg = _tiny_model_and_data()
+    order, scores = rank_neurons_by_dla(model, ds.test_inputs(), ds.test_labels())
+    assert sorted(order) == list(range(cfg.d_mlp))
+    assert len(scores) == cfg.d_mlp
+
+
+def test_ablating_top_dla_neuron_actually_changes_the_logits():
+    """Sanity check that the neuron index returned by ``rank_neurons_by_dla``
+    is actually wired into ``ablate_neurons`` correctly: mean-ablating it
+    should change the model's logits (it is exceedingly unlikely, but not
+    provable via accuracy alone, that a random-init neuron's activation
+    already equals its own reference mean at every example). This catches an
+    off-by-one/wrong-axis indexing bug that an accuracy-only check could miss
+    by ties."""
+    model, ds, _ = _tiny_model_and_data(p=11)
+    inputs, labels = ds.test_inputs(), ds.test_labels()
+    order, _ = rank_neurons_by_dla(model, inputs, labels)
+    _, mean_mlp_post = compute_reference_means(model, ds.train_inputs())
+
+    with torch.no_grad():
+        baseline_logits = model(inputs)
+    ablated_logits = model(inputs, ablate_neurons=[order[0]], mean_mlp_post=mean_mlp_post)
+    assert not torch.allclose(baseline_logits, ablated_logits)
