@@ -166,3 +166,53 @@ def rank_neurons_by_dla(
     per_neuron_mean = dla["per_neuron_correct"].mean(dim=0)  # (d_mlp,)
     order = torch.argsort(per_neuron_mean, descending=True).tolist()
     return order, per_neuron_mean.tolist()
+
+
+@torch.no_grad()
+def greedy_iterative_ablation(
+    model: OneLayerTransformer,
+    inputs: torch.Tensor,
+    labels: torch.Tensor,
+    candidates: list,
+    ablate_kind: str,
+    mean_z: Optional[torch.Tensor] = None,
+    mean_mlp_post: Optional[torch.Tensor] = None,
+):
+    """Greedily and cumulatively ablate whichever remaining candidate does
+    the most damage *given what has already been removed*, one at a time.
+
+    This is a different question from ranking components once (by DLA or
+    activation magnitude) and ablating that whole set together: a one-shot
+    ranking asks "how important does each component look in isolation, on
+    top of the intact model?", which can't see redundancy -- two components
+    that each look load-bearing alone might become interchangeable once one
+    of them is already gone. Greedy re-evaluates every remaining candidate
+    against the *current* (partially-ablated) model at each step, so it can
+    surface that kind of redundancy a static ranking cannot.
+
+    Returns a list of ``(component_index, accuracy_after_removing_it)`` in
+    removal order -- a permutation of ``candidates`` paired with the
+    cumulative accuracy trajectory as each one is removed.
+    """
+    if ablate_kind not in ("heads", "neurons"):
+        raise ValueError(f"ablate_kind must be 'heads' or 'neurons', got {ablate_kind!r}")
+
+    remaining = list(candidates)
+    already_ablated = []
+    trajectory = []
+    while remaining:
+        best_component, best_acc = None, None
+        for c in remaining:
+            trial = already_ablated + [c]
+            if ablate_kind == "heads":
+                acc = ablation_accuracy(model, inputs, labels, ablate_heads=trial, mean_z=mean_z)
+            else:
+                acc = ablation_accuracy(
+                    model, inputs, labels, ablate_neurons=trial, mean_mlp_post=mean_mlp_post
+                )
+            if best_acc is None or acc < best_acc:
+                best_component, best_acc = c, acc
+        already_ablated.append(best_component)
+        remaining.remove(best_component)
+        trajectory.append((best_component, best_acc))
+    return trajectory
