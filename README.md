@@ -105,8 +105,9 @@ just asserted. Reproduce with `python scripts/run_experiment.py` followed by
 `python scripts/continue_run.py --run-dir runs/modadd_p53 --extra-steps 30000`
 (see "the training run took longer than expected" below for why it's two commands).
 `python scripts/reanalyze.py --run-dir runs/modadd_p53` re-runs just the analysis step
-(DLA, ablation, Fourier) against the existing checkpoint without retraining — used here
-to add the exact-DLA neuron ranking to `analysis.json` after the fact.
+(DLA, ablation, Fourier, greedy iterative ablation) against the existing checkpoint
+without retraining — used here to add the exact-DLA neuron ranking and the greedy
+iterative ablation results below to `analysis.json` after the fact.
 
 ### The training run took longer than expected, and that's worth reporting as-is
 
@@ -248,25 +249,65 @@ heuristic is a substitute for actually ablating and re-measuring — this is
 the second independent piece of evidence in this repo for that conclusion,
 not a restatement of the first.**
 
+### Does greedy iterative ablation converge on a different set than one-shot ranking?
+
+This is the natural follow-up to the DLA-vs-ablation mismatch above: a one-shot ranking
+(by DLA or by activation magnitude) asks "how important does this component look on top
+of the *intact* model?" — it can't see redundancy, where two components each look
+load-bearing alone but become interchangeable once one is already gone. Greedy iterative
+ablation (`greedy_iterative_ablation` in `circuit_lab/interp.py`) instead asks, at each
+step, "which *remaining* component does the most damage given what's already been
+removed?", removes that one, and repeats — a strictly causal, optimization-driven
+alternative to both static rankings.
+
+**Heads.** Greedily removing the most damaging remaining head, one at a time, gives order
+`[2, 1, 3, 0]` with cumulative test accuracy `[29.96%, 9.66%, 3.36%, 1.58%]` (chance is
+~1.9% for 53 classes). The head greedy picks *first* — head 2 — is neither the DLA
+top-ranked head (head 1, DLA score 0.467) nor DLA's bottom-ranked head (head 0, score
+0.137); it's DLA's *third*-ranked head (score 0.267), and ablating it alone (29.96%
+accuracy) is more damaging than ablating the DLA-favorite head 1 alone (36.37%, from the
+one-shot table above). This sharpens rather than just repeats the earlier finding: DLA's
+ranking isn't merely noisy at the margins, its single top pick is the head whose solo
+removal hurts *least* among all four.
+
+**Neurons.** Restricting the candidate pool to the 31 neurons flagged by *either* the
+magnitude proxy or exact DLA (the union of the two top-20 sets above, so the search stays
+cheap and directly comparable to that analysis) and greedily removing the most damaging
+remaining neuron 20 times lands on **exactly** the same 20 neurons as the magnitude-proxy
+top-20 — not approximately, the sets are identical, which was surprising enough to check
+independently rather than trust: the 11 candidate neurons greedy leaves untouched after
+20 removals are precisely the 11 neurons that are in the DLA top-20 but *not* the
+magnitude top-20 (verified directly from `analysis.json`, not just asserted). In other
+words, when an actual causal search is used as the referee between the two proxies on
+this pool, it sides with the cheap activation-magnitude heuristic over exact DLA every
+time — consistent with, and now backed by an optimization procedure rather than a second
+heuristic, the "practical lesson" from the DLA-vs-magnitude section above. The accuracy
+trajectory itself is not perfectly monotonic (it dips to 66.07% at 10 removals, wobbles up
+to 66.79% at 16, then resumes falling to 53.87% by all 31) — a reminder that mean-ablating
+a growing set is not guaranteed to be monotonically worse, since a newly-ablated
+component's mean can occasionally partially cancel damage from an earlier one.
+
 ## Status / next steps
 
 Implemented: full training loop with grokking-inducing weight decay, exact direct logit
 attribution at both the attention-head and individual-MLP-neuron level, mean-ablation causal
-validation at both levels, and Fourier analysis of the learned embeddings. The three questions
-posed in "Why this problem" above are all answered with real numbers, not asserted, and the
-exact-DLA-vs-magnitude-proxy check flagged as a next step in an earlier version of this section
-is now done (see "Does exact per-neuron DLA agree with the activation-magnitude proxy above?").
+validation at both levels, Fourier analysis of the learned embeddings, and greedy iterative
+ablation at both levels. The three questions posed in "Why this problem" above are all
+answered with real numbers, not asserted, and both follow-up threads flagged in earlier
+versions of this section — the exact-DLA-vs-magnitude-proxy check, and whether greedy
+iterative ablation converges on a different set than one-shot ranking — are now done (see the
+two sections above).
 
 Open threads a future run could pick up: (1) this repo only studies modular *addition* —
 Nanda et al.'s follow-on work also covers subtraction and other group operations, which would
 need a different circuit (and might not show the same clean Fourier structure) to describe;
 (2) no sparse autoencoder is trained on the MLP activations here — an SAE could test whether
 the "sparse Fourier" story is the *complete* picture of what the neurons represent, or whether
-there's structure the raw-activation analysis in this repo is missing; (3) the DLA-vs-ablation
-mismatch found at both the head and neuron level suggests a natural follow-up: does *iterative*
-ablation (remove the single most damaging component, re-rank, repeat) converge on a
-smaller/different set than either one-shot ranking, given that components can be redundant with
-each other in ways a static ranking can't see?
+there's structure the raw-activation analysis in this repo is missing; (3) the greedy neuron
+search above was restricted to a 31-neuron candidate pool for tractability — running it over
+the full 256 neurons would be O(256²) forward passes (still cheap on this tiny model, just not
+done yet) and could reveal whether any neuron *outside* both top-20 sets is nonetheless
+load-bearing in combination with others.
 
 ## License
 

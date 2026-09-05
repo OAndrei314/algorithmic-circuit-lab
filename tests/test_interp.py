@@ -7,6 +7,7 @@ from circuit_lab.interp import (
     direct_logit_attribution,
     fourier_power_spectrum,
     fraction_of_power_in_top_k,
+    greedy_iterative_ablation,
     neuron_direct_logit_attribution,
     rank_components_by_dla,
     rank_neurons_by_dla,
@@ -121,3 +122,72 @@ def test_ablating_top_dla_neuron_actually_changes_the_logits():
         baseline_logits = model(inputs)
     ablated_logits = model(inputs, ablate_neurons=[order[0]], mean_mlp_post=mean_mlp_post)
     assert not torch.allclose(baseline_logits, ablated_logits)
+
+
+def test_greedy_iterative_ablation_rejects_unknown_kind():
+    model, ds, _ = _tiny_model_and_data()
+    inputs, labels = ds.test_inputs(), ds.test_labels()
+    try:
+        greedy_iterative_ablation(model, inputs, labels, [0, 1], ablate_kind="neuron")
+        assert False, "expected ValueError for a non-plural ablate_kind"
+    except ValueError:
+        pass
+
+
+def test_greedy_iterative_ablation_visits_every_candidate_exactly_once():
+    model, ds, cfg = _tiny_model_and_data()
+    inputs, labels = ds.test_inputs(), ds.test_labels()
+    mean_z, _ = compute_reference_means(model, ds.train_inputs())
+
+    trajectory = greedy_iterative_ablation(
+        model, inputs, labels, list(range(cfg.n_heads)), ablate_kind="heads", mean_z=mean_z
+    )
+    visited = [component for component, _ in trajectory]
+    assert sorted(visited) == list(range(cfg.n_heads))
+    assert len(trajectory) == cfg.n_heads
+
+
+def test_greedy_iterative_ablation_final_step_matches_ablating_everything_at_once():
+    """The last entry's accuracy, after greedily removing every candidate
+    one at a time, must equal the accuracy from ablating all of them
+    together in a single call -- the cumulative ablated set is the same
+    either way, so the two computations should agree exactly."""
+    model, ds, cfg = _tiny_model_and_data()
+    inputs, labels = ds.test_inputs(), ds.test_labels()
+    mean_z, _ = compute_reference_means(model, ds.train_inputs())
+    all_heads = list(range(cfg.n_heads))
+
+    trajectory = greedy_iterative_ablation(
+        model, inputs, labels, all_heads, ablate_kind="heads", mean_z=mean_z
+    )
+    expected_final_acc = ablation_accuracy(model, inputs, labels, ablate_heads=all_heads, mean_z=mean_z)
+    assert trajectory[-1][1] == expected_final_acc
+
+
+def test_greedy_iterative_ablation_first_pick_matches_brute_force_single_ablation():
+    """The first component greedy removes must be whichever single
+    candidate, ablated alone, does the most damage -- brute-forced here
+    independently of the greedy loop as a correctness cross-check."""
+    model, ds, cfg = _tiny_model_and_data(p=11)
+    inputs, labels = ds.test_inputs(), ds.test_labels()
+    _, mean_mlp_post = compute_reference_means(model, ds.train_inputs())
+    candidates = list(range(cfg.d_mlp))
+
+    brute_force_accs = {
+        c: ablation_accuracy(model, inputs, labels, ablate_neurons=[c], mean_mlp_post=mean_mlp_post)
+        for c in candidates
+    }
+    expected_first = min(brute_force_accs, key=brute_force_accs.get)
+
+    trajectory = greedy_iterative_ablation(
+        model, inputs, labels, candidates, ablate_kind="neurons", mean_mlp_post=mean_mlp_post
+    )
+    assert trajectory[0][0] == expected_first
+    assert trajectory[0][1] == brute_force_accs[expected_first]
+
+
+def test_greedy_iterative_ablation_with_no_candidates_returns_empty_trajectory():
+    model, ds, _ = _tiny_model_and_data()
+    inputs, labels = ds.test_inputs(), ds.test_labels()
+    trajectory = greedy_iterative_ablation(model, inputs, labels, [], ablate_kind="heads")
+    assert trajectory == []
