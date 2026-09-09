@@ -22,7 +22,6 @@ from typing import Optional
 
 import torch
 
-from circuit_lab.data import ModularAdditionDataset
 from circuit_lab.model import OneLayerTransformer
 
 

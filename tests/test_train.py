@@ -1,6 +1,6 @@
 import torch
 
-from circuit_lab.data import make_modular_addition_dataset
+from circuit_lab.data import make_modular_addition_dataset, make_modular_arithmetic_dataset
 from circuit_lab.train import TrainConfig, first_threshold_crossing, train
 
 
@@ -82,6 +82,25 @@ def test_first_threshold_crossing_finds_first_index_at_or_above_threshold():
     assert first_threshold_crossing([0.1, 0.2, 0.3]) is None
     assert first_threshold_crossing([]) is None
     assert first_threshold_crossing([0.8, 0.9], threshold=0.85) == 1
+
+
+def test_train_defaults_to_addition_when_no_dataset_is_passed():
+    """cfg.op defaults to 'add', so calling train() with no explicit dataset
+    should build the same dataset as make_modular_addition_dataset directly
+    -- this is what every existing addition run and checkpoint implicitly
+    relies on, so it must keep holding after adding the op field."""
+    cfg = _tiny_cfg(steps=1)
+    _, _, built_dataset = train(cfg)
+    expected = make_modular_addition_dataset(cfg.p, cfg.train_fraction, seed=cfg.seed)
+    assert torch.equal(built_dataset.labels, expected.labels)
+
+
+def test_train_respects_op_field_for_subtraction():
+    cfg = _tiny_cfg(op="subtract", steps=1)
+    _, _, built_dataset = train(cfg)
+    expected = make_modular_arithmetic_dataset(cfg.p, op="subtract", train_fraction=cfg.train_fraction, seed=cfg.seed)
+    assert torch.equal(built_dataset.labels, expected.labels)
+    assert built_dataset.op == "subtract"
 
 
 def test_actual_training_run_uses_the_same_threshold_as_first_threshold_crossing():

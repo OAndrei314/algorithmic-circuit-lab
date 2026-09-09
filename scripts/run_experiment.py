@@ -12,6 +12,7 @@ import json
 
 import torch
 
+from circuit_lab.data import SUPPORTED_OPS
 from circuit_lab.interp import (
     ablation_accuracy,
     compute_reference_means,
@@ -26,6 +27,7 @@ from circuit_lab.train import TrainConfig, save_run, train
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--p", type=int, default=53)
+    parser.add_argument("--op", type=str, default="add", choices=SUPPORTED_OPS)
     parser.add_argument("--train-fraction", type=float, default=0.3)
     parser.add_argument("--d-model", type=int, default=64)
     parser.add_argument("--n-heads", type=int, default=4)
@@ -40,6 +42,7 @@ def main():
 
     cfg = TrainConfig(
         p=args.p,
+        op=args.op,
         train_fraction=args.train_fraction,
         d_model=args.d_model,
         n_heads=args.n_heads,

@@ -5,7 +5,7 @@ import json
 
 import torch
 
-from circuit_lab.data import make_modular_addition_dataset
+from circuit_lab.data import SUPPORTED_OPS, make_modular_arithmetic_dataset
 from circuit_lab.interp import (
     ablation_accuracy,
     compute_reference_means,
@@ -18,8 +18,9 @@ from circuit_lab.train import TrainConfig, save_run, train
 
 
 def train_cli():
-    parser = argparse.ArgumentParser(description="Train a 1-layer transformer on modular addition.")
+    parser = argparse.ArgumentParser(description="Train a 1-layer transformer on modular arithmetic.")
     parser.add_argument("--p", type=int, default=113)
+    parser.add_argument("--op", type=str, default="add", choices=SUPPORTED_OPS)
     parser.add_argument("--train-fraction", type=float, default=0.3)
     parser.add_argument("--d-model", type=int, default=128)
     parser.add_argument("--n-heads", type=int, default=4)
@@ -33,6 +34,7 @@ def train_cli():
 
     cfg = TrainConfig(
         p=args.p,
+        op=args.op,
         train_fraction=args.train_fraction,
         d_model=args.d_model,
         n_heads=args.n_heads,
@@ -58,7 +60,7 @@ def analyze_cli():
         cfg_dict = json.load(f)
     cfg = TrainConfig(**cfg_dict)
 
-    dataset = make_modular_addition_dataset(cfg.p, cfg.train_fraction, seed=cfg.seed)
+    dataset = make_modular_arithmetic_dataset(cfg.p, op=cfg.op, train_fraction=cfg.train_fraction, seed=cfg.seed)
     model_cfg = TransformerConfig(
         vocab_size=dataset.vocab_size,
         d_model=cfg.d_model,

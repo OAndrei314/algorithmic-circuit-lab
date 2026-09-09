@@ -16,7 +16,7 @@ import json
 
 import torch
 
-from circuit_lab.data import make_modular_addition_dataset
+from circuit_lab.data import make_modular_arithmetic_dataset
 from circuit_lab.interp import (
     ablation_accuracy,
     compute_reference_means,
@@ -39,7 +39,7 @@ def main():
         cfg_dict = json.load(f)
     cfg = TrainConfig(**cfg_dict)
 
-    dataset = make_modular_addition_dataset(cfg.p, cfg.train_fraction, seed=cfg.seed)
+    dataset = make_modular_arithmetic_dataset(cfg.p, op=cfg.op, train_fraction=cfg.train_fraction, seed=cfg.seed)
     model_cfg = TransformerConfig(
         vocab_size=dataset.vocab_size,
         d_model=cfg.d_model,
