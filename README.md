@@ -38,13 +38,17 @@ Concretely, this repo asks and answers three separable questions on that testbed
 
 ## How it works
 
-**Task.** Given `a, b ∈ [0, p)`, predict `(a + b) mod p`. Input is the 3-token sequence
+**Task.** Given `a, b ∈ [0, p)`, predict `a OP b (mod p)` where `OP` is addition or
+subtraction (`circuit_lab/data.py`, `--op add`/`--op subtract`). Input is the 3-token sequence
 `[a, b, EQUALS]`; the model reads off its answer from the logits at the final position. Only
 a fixed fraction of the `p²` possible pairs (30% by default, following Nanda et al.) is used
 for training — the rest is held out. That low train fraction is what makes the task hard: a
 model that just memorizes its training pairs gets ~30% accuracy including train, but only
 chance-level (~1/p) accuracy on the 70% of pairs it never saw. Only a model that discovers
-the actual `mod p` addition algorithm does well on both.
+the actual modular-arithmetic algorithm does well on both. Subtraction is the non-commutative
+case — `(a - b) mod p != (b - a) mod p` — included specifically to test whether the addition
+circuit's strategy is specific to commutative structure or generalizes (see "Honest results"
+below: it does not, at least not for free).
 
 **Model** (`circuit_lab/model.py`): a 1-layer, multi-head-attention + MLP transformer,
 **with no LayerNorm**. That's a deliberate simplification, not an oversight — with no
@@ -88,6 +92,9 @@ python scripts/run_experiment.py --p 11 --steps 500 --out runs/smoke
 # Full experiment: trains until grokking, then runs the DLA / ablation / Fourier
 # analysis and writes runs/modadd_p53/analysis.json. Takes ~15 minutes on a laptop CPU.
 python scripts/run_experiment.py --out runs/modadd_p53
+
+# Same pipeline on the non-commutative variant, (a - b) mod p:
+python scripts/run_experiment.py --op subtract --out runs/modsub_p53
 ```
 
 `circuit-lab-train` / `circuit-lab-analyze` (installed as console scripts) expose the same
@@ -287,27 +294,83 @@ to 66.79% at 16, then resumes falling to 53.87% by all 31) — a reminder that m
 a growing set is not guaranteed to be monotonically worse, since a newly-ablated
 component's mean can occasionally partially cancel damage from an earlier one.
 
+### Does the same weight-decay recipe grok on modular subtraction?
+
+No — and this is the more interesting answer than the "yes, with a different circuit" one
+the open-threads section below used to speculate. Subtraction (`(a - b) mod p`, non-commutative
+unlike addition) was trained with the *exact same* hyperparameters that reliably grok on
+addition (`p=53`, `d_model=64`, 4 heads, `d_mlp=256`, AdamW, `lr=1e-3`, `weight_decay=1.0`,
+`train_fraction=0.3`, seed 0) — the only change is `--op subtract`. Raw run artifacts are
+checked in at [`runs/modsub_p53/`](runs/modsub_p53/), same as the addition run.
+
+Train accuracy hits 100% almost immediately (by step ~4,000), exactly like addition. But test
+accuracy never rises above **~1.5%** — below the ~1.9% (1/53) chance level — for the entire
+run, including after extending training to **120,000 steps**: double both the addition run's
+final 60,000-step budget and its 42,600-step grok point. This is not "still trending toward
+grokking, just slower": the test-set cross-entropy loss doesn't plateau near the memorizing
+run's flat loss the way addition's pre-grok phase did (see the first honest-results section
+above) — it oscillates, roughly periodically, between ~14 and ~38 nats for the full 120,000
+steps (4-10x the ~3.97-nat loss of a uniform guess), while train loss stays pinned near zero.
+That is a real, checked-in-history pattern (`runs/modsub_p53/history.json`), not a rounding
+artifact — consistent with a limit cycle where weight decay and the (already-near-zero-loss,
+but not exactly zero) memorization gradient keep fighting over the parameters' norm, rather
+than the model settling into either a clean memorizing plateau or a lower-norm generalizing
+solution.
+
+The rest of the analysis is consistent with "never found the algorithm, at any point": the
+embedding Fourier spectrum concentrates only 30.2% of its power in the top 2 frequencies and
+51.5% in the top 6 (vs. addition's 92.5% / 95.7%) — nowhere near the sinusoidal signature of a
+generalizing solution. Head DLA scores are all *negative* (unlike addition's, where the DLA
+leader was 3.4x the runner-up), meaning attention heads are on average pointing *away* from
+the correct answer at this checkpoint. And ablating anything — any single head, the top-20
+neurons by either ranking, or a random 20 — moves test accuracy by at most ~0.7 points,
+because there is no generalizing circuit left for an ablation to damage; contrast this with
+addition, where every single-head ablation was catastrophic (a >60-point drop) because a real
+algorithm was there to break.
+
+One concrete, checkable hypothesis for *why* subtraction is harder at matched compute: addition
+gets a "two-for-one" from commutativity that subtraction does not. Every unordered training
+pair `{a, b}` with `a != b` appears as *both* ordered examples `(a, b)` and `(b, a)` in the
+full `p^2` grid, and for addition they carry the *same* label — so a 30% sample of ordered
+pairs effectively constrains far more than 30% of the *label function's* independent degrees
+of freedom. For subtraction, `(a, b)` and `(b, a)` give different (negated) labels, so that
+free consistency check disappears and the model must fit each ordered pair's contribution
+independently. This is a plausible mechanism, not a proven one — the honest next step is
+below, not a claim made here without re-running it.
+
 ## Status / next steps
 
 Implemented: full training loop with grokking-inducing weight decay, exact direct logit
 attribution at both the attention-head and individual-MLP-neuron level, mean-ablation causal
-validation at both levels, Fourier analysis of the learned embeddings, and greedy iterative
-ablation at both levels. The three questions posed in "Why this problem" above are all
-answered with real numbers, not asserted, and both follow-up threads flagged in earlier
-versions of this section — the exact-DLA-vs-magnitude-proxy check, and whether greedy
-iterative ablation converges on a different set than one-shot ranking — are now done (see the
-two sections above).
+validation at both levels, Fourier analysis of the learned embeddings, greedy iterative
+ablation at both levels, and a second task (modular subtraction) exercising the same pipeline.
+The three questions posed in "Why this problem" above are all answered with real numbers, not
+asserted, and both follow-up threads flagged in earlier versions of this section — the
+exact-DLA-vs-magnitude-proxy check, and whether greedy iterative ablation converges on a
+different set than one-shot ranking — are done (see the two sections above).
 
-Open threads a future run could pick up: (1) this repo only studies modular *addition* —
-Nanda et al.'s follow-on work also covers subtraction and other group operations, which would
-need a different circuit (and might not show the same clean Fourier structure) to describe;
-(2) no sparse autoencoder is trained on the MLP activations here — an SAE could test whether
-the "sparse Fourier" story is the *complete* picture of what the neurons represent, or whether
-there's structure the raw-activation analysis in this repo is missing; (3) the greedy neuron
-search above was restricted to a 31-neuron candidate pool for tractability — running it over
-the full 256 neurons would be O(256²) forward passes (still cheap on this tiny model, just not
-done yet) and could reveal whether any neuron *outside* both top-20 sets is nonetheless
-load-bearing in combination with others.
+The repo now also studies modular *subtraction* (`circuit_lab/data.py`'s `op` parameter,
+`--op subtract`), specifically to test whether the addition circuit's strategy transfers to a
+non-commutative task. The honest finding (see the section above) is that it does not, at least
+not for free: identical hyperparameters that reliably grok on addition fail to grok on
+subtraction even after 120,000 steps (2x addition's budget), instead settling into a
+non-converging train/test loss oscillation. That is itself a real, reportable result, but it
+opens rather than closes this thread.
+
+Open threads a future run could pick up: (1) the subtraction non-grok result above has one
+concrete, untested hypothesis attached (loss of the addition's implicit `(a,b)`/`(b,a)`
+consistency constraint) — the natural follow-up is re-running subtraction with a higher
+`train_fraction` (which would test that hypothesis directly: if it groks with more ordered
+pairs per unordered pair, that supports the redundancy story) and/or a substantially longer
+step budget or different weight decay, to determine whether it's "harder, same recipe
+eventually works" or "this recipe doesn't work for this task at all"; (2) no sparse
+autoencoder is trained on the MLP activations here — an SAE could test whether the "sparse
+Fourier" story is the *complete* picture of what the addition-model's neurons represent, or
+whether there's structure the raw-activation analysis in this repo is missing; (3) the greedy
+neuron search above was restricted to a 31-neuron candidate pool for tractability — running it
+over the full 256 neurons would be O(256²) forward passes (still cheap on this tiny model,
+just not done yet) and could reveal whether any neuron *outside* both top-20 sets is
+nonetheless load-bearing in combination with others.
 
 ## License
 

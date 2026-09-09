@@ -11,7 +11,7 @@ import json
 
 import torch
 
-from circuit_lab.data import make_modular_addition_dataset
+from circuit_lab.data import make_modular_arithmetic_dataset
 from circuit_lab.train import TrainConfig, save_run, train
 
 
@@ -30,7 +30,7 @@ def main():
 
     prior_steps = old["history"][-1]["step"] + 1
     cfg = TrainConfig(**cfg_dict)
-    dataset = make_modular_addition_dataset(cfg.p, cfg.train_fraction, seed=cfg.seed)
+    dataset = make_modular_arithmetic_dataset(cfg.p, op=cfg.op, train_fraction=cfg.train_fraction, seed=cfg.seed)
 
     state_dict = torch.load(f"{args.run_dir}/model.pt")
     cont_cfg = TrainConfig(**{**cfg_dict, "steps": args.extra_steps})

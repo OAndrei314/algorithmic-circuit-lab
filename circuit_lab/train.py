@@ -16,13 +16,14 @@ from typing import Optional
 
 import torch
 
-from circuit_lab.data import ModularAdditionDataset, make_modular_addition_dataset
+from circuit_lab.data import ModularArithmeticDataset, make_modular_arithmetic_dataset
 from circuit_lab.model import OneLayerTransformer, TransformerConfig
 
 
 @dataclass
 class TrainConfig:
     p: int = 113
+    op: str = "add"
     train_fraction: float = 0.3
     d_model: int = 128
     n_heads: int = 4
@@ -70,11 +71,11 @@ def _loss_and_acc(logits: torch.Tensor, labels: torch.Tensor):
 
 def train(
     cfg: TrainConfig,
-    dataset: Optional[ModularAdditionDataset] = None,
+    dataset: Optional[ModularArithmeticDataset] = None,
     init_state_dict: Optional[dict] = None,
     step_offset: int = 0,
 ) -> tuple:
-    """Train a OneLayerTransformer on modular addition. Returns (model, TrainResult).
+    """Train a OneLayerTransformer on a modular arithmetic task. Returns (model, TrainResult).
 
     ``init_state_dict`` / ``step_offset`` let a run continue training an
     existing checkpoint for more steps (e.g. because it was still visibly
@@ -83,7 +84,7 @@ def train(
     returned history are offset so they stay comparable to the earlier run's.
     """
     if dataset is None:
-        dataset = make_modular_addition_dataset(cfg.p, cfg.train_fraction, seed=cfg.seed)
+        dataset = make_modular_arithmetic_dataset(cfg.p, op=cfg.op, train_fraction=cfg.train_fraction, seed=cfg.seed)
 
     model_cfg = TransformerConfig(
         vocab_size=dataset.vocab_size,

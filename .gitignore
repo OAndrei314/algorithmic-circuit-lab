@@ -7,7 +7,9 @@ venv/
 build/
 dist/
 
-# runs/modadd_p53/ (the reference experiment backing the README's numbers) is
-# small (<1MB total) and committed intentionally. Ad-hoc/scratch runs aren't.
+# runs/modadd_p53/ and runs/modsub_p53/ (the reference experiments backing the
+# README's numbers) are small (<1MB total) and committed intentionally.
+# Ad-hoc/scratch runs aren't.
 runs/*
 !runs/modadd_p53/
+!runs/modsub_p53/
